@@ -10520,7 +10520,14 @@ dependencies = [
  "data-encoding",
  "either",
  "erased-serde",
+<<<<<<< HEAD
  "indexmap 2.14.0",
+||||||| parent of 9e71b74ffb (Turbopack: reimplement server actions using emit/collect)
+ "indexmap 2.13.0",
+=======
+ "futures",
+ "indexmap 2.13.0",
+>>>>>>> 9e71b74ffb (Turbopack: reimplement server actions using emit/collect)
  "num-bigint",
  "patricia_tree",
  "petgraph 0.8.3",
