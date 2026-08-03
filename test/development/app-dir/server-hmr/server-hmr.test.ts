@@ -13,10 +13,8 @@ describe('server-hmr', () => {
 
   describe('module preservation', () => {
     itTurbopackDev(
-      'does not compile a changed server module until the next request',
+      'does not evaluate a changed server module until the next request',
       async () => {
-        await next.deleteFile('lazy-rebuild-probe.log').catch(() => {})
-
         const browser = await next.browser('/lazy-rebuild')
         await retry(async () => {
           expect(await browser.elementByCss('#value').text()).toBe('initial')
@@ -27,13 +25,15 @@ describe('server-hmr', () => {
           window.fetch = (input, init) => {
             const headers = new Headers(init?.headers)
             if (headers.get('next-hmr-refresh') === '1') {
+              ;(window as any).__didBlockHmrRequest = true
               return new Promise(() => {})
             }
             return originalFetch(input, init)
           }
         })
 
-        const initialCompileLog = await next.readFile('lazy-rebuild-probe.log')
+        const evaluationMarker = 'lazy-rebuild-probe evaluated'
+        const outputLengthBeforePatch = next.cliOutput.length
 
         await next.patchFile('app/lazy-rebuild/probe.js', (content) =>
           content.replace(
@@ -43,17 +43,21 @@ describe('server-hmr', () => {
         )
 
         await retry(async () => {
-          expect(await next.readFile('lazy-rebuild-probe.log')).toBe(
-            initialCompileLog
+          expect(
+            await browser.eval(() => (window as any).__didBlockHmrRequest)
+          ).toBe(true)
+        })
+        expect(next.cliOutput.slice(outputLengthBeforePatch)).not.toContain(
+          evaluationMarker
+        )
+
+        const response = await next.fetch('/lazy-rebuild')
+        expect(await response.text()).toContain('updated')
+        await retry(async () => {
+          expect(next.cliOutput.slice(outputLengthBeforePatch)).toContain(
+            evaluationMarker
           )
         })
-
-        expect(await (await next.fetch('/lazy-rebuild')).text()).toContain(
-          'updated'
-        )
-        expect(await next.readFile('lazy-rebuild-probe.log')).not.toBe(
-          initialCompileLog
-        )
       }
     )
 
