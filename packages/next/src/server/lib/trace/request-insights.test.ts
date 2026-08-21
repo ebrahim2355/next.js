@@ -6,7 +6,17 @@ import {
   recordRequestInsightSource,
   subscribeRequestInsights,
 } from './request-insights'
+import {
+  closeRequestInsightsJournal,
+  initializeRequestInsightsJournal,
+  readRequestInsightsJournal,
+  resetRequestInsightsJournalForTest,
+} from './request-insights-journal'
+import { RotatingWriteStream } from './rotating-write-stream'
 import { recordSpan } from './span-store'
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import path from 'path'
 
 const originalRequestInsights = process.env.__NEXT_REQUEST_INSIGHTS
 const originalDevServer = process.env.__NEXT_DEV_SERVER
@@ -24,9 +34,10 @@ describe('request insights', () => {
     process.env.__NEXT_DEV_SERVER = '1'
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     restoreEnv('__NEXT_REQUEST_INSIGHTS', originalRequestInsights)
     restoreEnv('__NEXT_DEV_SERVER', originalDevServer)
+    await resetRequestInsightsJournalForTest()
     clearRequestInsightsForTest()
   })
 
@@ -277,6 +288,145 @@ describe('request insights', () => {
         durationMs: 50,
       })
     )
+  })
+
+  it('keeps active requests until they finish before applying the completed request limit', () => {
+    process.env.__NEXT_REQUEST_INSIGHTS = 'true'
+
+    recordSpan({
+      name: 'long-running work',
+      requestId: 'long-running',
+      startTime: 1,
+      durationMs: 1,
+    })
+
+    for (let index = 0; index < 101; index++) {
+      recordSpan({
+        name: `GET /completed/${index}`,
+        requestId: `completed-${index}`,
+        startTime: index + 10,
+        durationMs: 1,
+        attributes: {
+          'next.span_type': 'BaseServer.handleRequest',
+        },
+      })
+    }
+
+    expect(
+      getRequestInsightsSnapshot()
+        .requests.find((request) => request.requestId === 'long-running')
+        ?.spans.map((span) => span.name)
+    ).toEqual(['long-running work'])
+
+    recordSpan({
+      name: 'GET /long-running',
+      requestId: 'long-running',
+      startTime: 1,
+      durationMs: 200,
+      attributes: {
+        'next.span_type': 'BaseServer.handleRequest',
+      },
+    })
+
+    const snapshot = getRequestInsightsSnapshot()
+    expect(snapshot.requests).toHaveLength(100)
+    expect(
+      snapshot.requests
+        .find((request) => request.requestId === 'long-running')
+        ?.spans.map((span) => span.name)
+    ).toEqual(['long-running work', 'GET /long-running'])
+  })
+
+  it('journals a completed request once with its full sanitized trace', async () => {
+    process.env.__NEXT_REQUEST_INSIGHTS = 'true'
+    const distDir = await mkdtemp(path.join(tmpdir(), 'request-insights-'))
+    await initializeRequestInsightsJournal(distDir)
+
+    recordSpan({
+      name: 'render route',
+      requestId: 'journaled',
+      htmlRequestId: 'document',
+      startTime: 100,
+      durationMs: 20,
+    })
+    expect(
+      await readRequestInsightsJournal(distDir, { requestId: 'journaled' })
+    ).toEqual([])
+
+    recordSpan({
+      name: 'GET /journaled',
+      requestId: 'journaled',
+      htmlRequestId: 'document',
+      startTime: 90,
+      durationMs: 40,
+      status: 'ok',
+      attributes: {
+        'next.span_type': 'BaseServer.handleRequest',
+      },
+    })
+
+    clearRequestInsightsForTest()
+    expect(
+      await readRequestInsightsJournal(distDir, { requestId: 'journaled' })
+    ).toEqual([
+      expect.objectContaining({
+        requestId: 'journaled',
+        htmlRequestId: 'document',
+        completedAt: 130,
+        spans: [
+          expect.objectContaining({ name: 'render route' }),
+          expect.objectContaining({ name: 'GET /journaled' }),
+        ],
+      }),
+    ])
+
+    await resetRequestInsightsJournalForTest()
+    await rm(distDir, { recursive: true, force: true })
+  })
+
+  it('closes the journal idempotently and flushes pending appends', async () => {
+    process.env.__NEXT_REQUEST_INSIGHTS = 'true'
+    const distDir = await mkdtemp(path.join(tmpdir(), 'request-insights-'))
+    await initializeRequestInsightsJournal(distDir)
+
+    recordSpan({
+      name: 'GET /flushed',
+      requestId: 'flushed',
+      htmlRequestId: 'document',
+      startTime: 1,
+      durationMs: 2,
+      attributes: {
+        'next.span_type': 'BaseServer.handleRequest',
+      },
+    })
+    await closeRequestInsightsJournal()
+
+    await expect(
+      readRequestInsightsJournal(distDir, { requestId: 'flushed' })
+    ).resolves.toEqual([
+      expect.objectContaining({ requestId: 'flushed', completedAt: 3 }),
+    ])
+
+    await expect(closeRequestInsightsJournal()).resolves.toBeUndefined()
+    await rm(distDir, { recursive: true, force: true })
+  })
+
+  it('seeds rotation size from existing file content in append mode', async () => {
+    const distDir = await mkdtemp(path.join(tmpdir(), 'rotating-stream-'))
+    const file = path.join(distDir, 'journal.ndjson')
+    const existing = `${'x'.repeat(64)}\n`
+    await writeFile(file, existing)
+
+    const stream = new RotatingWriteStream(file, 70, 'a')
+    // The pre-existing content plus the next write exceeds the limit, so the
+    // write rotates (truncates) instead of appending past it.
+    await stream.write(`${'y'.repeat(10)}\n`)
+    await stream.end()
+
+    const contents = await readFile(file, 'utf8')
+    expect(contents).not.toContain('x')
+    expect(contents).toBe(`${'y'.repeat(10)}\n`)
+    await rm(distDir, { recursive: true, force: true })
   })
 
   it('classifies framework request sources without letting the root span erase a specific source', () => {

@@ -4,6 +4,7 @@ import path from 'path'
 import { PHASE_DEVELOPMENT_SERVER } from '../../shared/lib/constants'
 import type { TraceEvent } from '../types'
 import type { Reporter } from './types'
+import { RotatingWriteStream } from '../../server/lib/trace/rotating-write-stream'
 
 // Batch events as zipkin allows for multiple events to be sent in one go
 export function batcher(reportEvents: (evts: TraceEvent[]) => Promise<void>) {
@@ -29,75 +30,6 @@ export function batcher(reportEvents: (evts: TraceEvent[]) => Promise<void>) {
         report.then(() => queue.delete(report))
       }
     },
-  }
-}
-
-const writeStreamOptions = {
-  flags: 'a',
-  encoding: 'utf8' as const,
-}
-class RotatingWriteStream {
-  file: string
-  writeStream!: fs.WriteStream
-  size: number
-  sizeLimit: number
-  private rotatePromise: Promise<void> | undefined
-  private drainPromise: Promise<void> | undefined
-  constructor(file: string, sizeLimit: number) {
-    this.file = file
-    this.size = 0
-    this.sizeLimit = sizeLimit
-    this.createWriteStream()
-  }
-  private createWriteStream() {
-    const phase = traceGlobals.get('phase')
-    this.writeStream = fs.createWriteStream(this.file, {
-      ...writeStreamOptions,
-      // In dev, append so traces accumulate across sessions. In production,
-      // truncate so each build starts with a fresh trace file.
-      flags: phase === PHASE_DEVELOPMENT_SERVER ? 'a' : 'w',
-    })
-  }
-  // Recreate the file
-  private async rotate() {
-    await this.end()
-    try {
-      fs.unlinkSync(this.file)
-    } catch (err: any) {
-      // It's fine if the file does not exist yet
-      if (err.code !== 'ENOENT') {
-        throw err
-      }
-    }
-    this.size = 0
-    this.createWriteStream()
-    this.rotatePromise = undefined
-  }
-  async write(data: string): Promise<void> {
-    if (this.rotatePromise) await this.rotatePromise
-
-    this.size += data.length
-    if (this.size > this.sizeLimit) {
-      await (this.rotatePromise = this.rotate())
-    }
-
-    if (!this.writeStream.write(data, 'utf8')) {
-      if (this.drainPromise === undefined) {
-        this.drainPromise = new Promise<void>((resolve, _reject) => {
-          this.writeStream.once('drain', () => {
-            this.drainPromise = undefined
-            resolve()
-          })
-        })
-      }
-      await this.drainPromise
-    }
-  }
-
-  end(): Promise<void> {
-    return new Promise((resolve) => {
-      this.writeStream.end(resolve)
-    })
   }
 }
 
@@ -129,7 +61,13 @@ export function createJsonReporter(options: {
             typeof options.sizeLimit === 'function'
               ? options.sizeLimit(phase)
               : options.sizeLimit
-          writeStream = new RotatingWriteStream(file, limit)
+          writeStream = new RotatingWriteStream(
+            file,
+            limit,
+            // In dev, append so traces accumulate across sessions. In
+            // production, truncate so each build starts with a fresh file.
+            phase === PHASE_DEVELOPMENT_SERVER ? 'a' : 'w'
+          )
         }
         const eventsJson = JSON.stringify(events)
         try {

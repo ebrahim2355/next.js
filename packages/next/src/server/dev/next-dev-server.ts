@@ -84,6 +84,10 @@ import { getRouteRegex } from '../../shared/lib/router/utils/route-regex'
 import type { PrerenderedRoute } from '../../build/static-paths/types'
 import { HMR_MESSAGE_SENT_TO_BROWSER } from './hot-reloader-types'
 import { registerLocalSpanRecorder } from '../lib/trace/local-span-recorder'
+import {
+  closeRequestInsightsJournal,
+  configureRequestInsightsJournal,
+} from '../lib/trace/request-insights-journal'
 
 registerLocalSpanRecorder()
 
@@ -270,6 +274,12 @@ export default class DevServer extends Server {
   protected async prepareImpl(): Promise<void> {
     setGlobal('distDir', this.distDir)
     setGlobal('phase', PHASE_DEVELOPMENT_SERVER)
+    if (this.nextConfig.experimental.requestInsights) {
+      configureRequestInsightsJournal(this.distDir)
+      this.onServerClose(async () => {
+        await closeRequestInsightsJournal()
+      })
+    }
 
     // Use existing telemetry instance from traceGlobals instead of creating a new one.
     // Creating a new instance would overwrite the existing one, causing any telemetry

@@ -64,7 +64,7 @@ export const getOrCreateMcpServer = (options: McpServerOptions) => {
     pagesDir: options.pagesDir,
     appDir: options.appDir,
   })
-  registerGetRequestInsightsTool(mcpServer)
+  registerGetRequestInsightsTool(mcpServer, options.distDir)
 
   if (options.getTurbopackProject) {
     registerGetCompilationIssuesTool(mcpServer, options.getTurbopackProject)

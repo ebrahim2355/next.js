@@ -137,7 +137,22 @@ export function updateRequestInsights(
     (request) => getRequestInsightKey(request) !== insightKey
   )
   requests.push(insight)
-  return requests.slice(-100)
+
+  let completedCount = requests.reduce(
+    (count, request) => count + (request.completedAt === undefined ? 0 : 1),
+    0
+  )
+  if (completedCount <= 100) {
+    return requests
+  }
+
+  return requests.filter((request) => {
+    if (request.completedAt === undefined || completedCount <= 100) {
+      return true
+    }
+    completedCount--
+    return false
+  })
 }
 
 export const STORAGE_KEY_PANEL_POSITION_PREFIX =

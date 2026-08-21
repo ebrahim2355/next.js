@@ -70,6 +70,7 @@ export type RequestInsight = {
   url?: string
   startTime: number
   durationMs?: number
+  completedAt?: number
   status: 'ok' | 'error' | 'pending'
   spans: RequestInsightSpan[]
   fetches: RequestInsightFetch[]

@@ -21,9 +21,10 @@ import type {
 } from './span-store'
 import type { RequestInsightsIdentity } from './request-insights-identity'
 import { createLocalSpanId } from './local-span-recorder'
+import { AppRenderSpan } from './constants'
 export { isRequestInsightsEnabled } from './span-store'
 
-const MAX_REQUEST_INSIGHTS = 100
+const MAX_COMPLETED_REQUEST_INSIGHTS = 100
 const MAX_REQUEST_INSIGHT_URL_LENGTH = 2048
 const MAX_REQUEST_INSIGHT_RAW_URL_LENGTH = 64 * 1024
 const REQUEST_INSIGHTS_STORE_KEY = Symbol.for('@next/request-insights-store')
@@ -68,6 +69,7 @@ class InMemoryRequestInsightsStore {
     { startTime: number; durationMs: number }
   >()
   private readonly requestOrder: string[] = []
+  private readonly completedRequestOrder: string[] = []
   private readonly listeners = new Set<RequestInsightsListener>()
 
   recordSpan(
@@ -104,12 +106,9 @@ class InMemoryRequestInsightsStore {
     )
     insight.route = insight.route ?? span.route
     insight.url = insight.url ?? sanitizeUrl(span.url)
-    this.updateTiming(
-      insight,
-      spanStartTime,
-      span.durationMs,
-      span.attributes?.['next.span_type'] === 'BaseServer.handleRequest'
-    )
+    const spanType = span.attributes?.['next.span_type']
+    const isRequestSpan = spanType === REQUEST_INSIGHT_REQUEST_SPAN_TYPE
+    this.updateTiming(insight, spanStartTime, span.durationMs, isRequestSpan)
     insight.status =
       insight.status === 'error' || span.status === 'error'
         ? 'error'
@@ -134,6 +133,13 @@ class InMemoryRequestInsightsStore {
     const fetch = getFetchInsight(span)
     if (fetch) {
       this.recordFetchForInsight(insight, fetch)
+    }
+
+    if (
+      span.durationMs !== undefined &&
+      (isRequestSpan || spanType === AppRenderSpan.instantInsights)
+    ) {
+      this.complete(insight, spanStartTime + span.durationMs)
     }
 
     if (shouldNotify) {
@@ -205,6 +211,7 @@ class InMemoryRequestInsightsStore {
     this.requests.clear()
     this.requestTimings.clear()
     this.requestOrder.length = 0
+    this.completedRequestOrder.length = 0
   }
 
   private updateTiming(
@@ -268,7 +275,6 @@ class InMemoryRequestInsightsStore {
       }
       this.requests.set(insightKey, insight)
       this.requestOrder.push(insightKey)
-      this.trim()
     }
 
     insight.htmlRequestId = identity.htmlRequestId ?? insight.htmlRequestId
@@ -309,14 +315,41 @@ class InMemoryRequestInsightsStore {
     insight.fetches.push(sanitizeFetchInsight(fetch))
   }
 
-  private trim(): void {
-    while (this.requestOrder.length > MAX_REQUEST_INSIGHTS) {
-      const insightKey = this.requestOrder.shift()
-      if (insightKey) {
-        this.requests.delete(insightKey)
-        this.requestTimings.delete(insightKey)
+  private complete(insight: RequestInsight, completedAt: number): void {
+    if (insight.completedAt !== undefined) {
+      return
+    }
+
+    const insightKey = getRequestInsightKey(insight)
+    insight.completedAt = completedAt
+    this.completedRequestOrder.push(insightKey)
+    appendCompletedRequestInsight(insight)
+
+    const requestIndex = this.requestOrder.indexOf(insightKey)
+    if (requestIndex !== -1) {
+      this.requestOrder.splice(requestIndex, 1)
+      this.requestOrder.push(insightKey)
+    }
+
+    while (this.completedRequestOrder.length > MAX_COMPLETED_REQUEST_INSIGHTS) {
+      const completedInsightKey = this.completedRequestOrder.shift()
+      if (completedInsightKey) {
+        this.requests.delete(completedInsightKey)
+        this.requestTimings.delete(completedInsightKey)
+        const completedIndex = this.requestOrder.indexOf(completedInsightKey)
+        if (completedIndex !== -1) {
+          this.requestOrder.splice(completedIndex, 1)
+        }
       }
     }
+  }
+}
+
+function appendCompletedRequestInsight(insight: RequestInsight): void {
+  if (process.env.__NEXT_DEV_SERVER && process.env.__NEXT_REQUEST_INSIGHTS) {
+    const { appendRequestInsightToJournal } =
+      require('./request-insights-journal') as typeof import('./request-insights-journal')
+    appendRequestInsightToJournal(insight)
   }
 }
 
