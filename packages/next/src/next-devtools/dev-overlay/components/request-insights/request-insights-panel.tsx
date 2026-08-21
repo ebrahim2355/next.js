@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
+import { ContextMenu } from '@base-ui-components/react/context-menu'
 import { Menu } from '@base-ui-components/react/menu'
 import {
   getRequestInsightKey,
@@ -32,8 +33,10 @@ import {
 import {
   formatRequestRouteParams,
   getRequestDisplayUrl,
+  getRequestInsightAgentPrompt,
   getRequestListDisplayUrl,
   getRequestRouteParams,
+  getShortRequestId,
 } from './request-label'
 import {
   getActiveRequestKey,
@@ -273,6 +276,7 @@ export function RequestInsightsPanel() {
                 request={request}
                 pageLoad={isPageLoadRequest(request, initialRequestId)}
                 selected={requestKey === activeRequestKey}
+                shadowRoot={shadowRoot}
                 onSelect={() => setSelectedRequestKey(requestKey)}
               />
             )
@@ -378,12 +382,14 @@ function RequestRow({
   nested,
   pageLoad,
   selected,
+  shadowRoot,
   onSelect,
 }: {
   request: RequestInsight
   nested: boolean
   pageLoad: boolean
   selected: boolean
+  shadowRoot: ShadowRoot
   onSelect: () => void
 }) {
   const isInstantInsights =
@@ -393,55 +399,169 @@ function RequestRow({
     request,
     requestType.type === 'rsc'
   )
+  const capturedRequestUrl = request.url
   const clockTime = formatClockTime(request.startTime)
   const bypassesProxy = request.proxyStatus === 'bypassed'
 
   return (
-    <button
-      aria-label={`${isInstantInsights ? `Instant Insights for ${requestUrl}` : requestUrl}, ${requestType.accessibleLabel}, ${bypassesProxy ? 'Did not match the configured proxy, ' : ''}${formatDuration(request.durationMs)}, ${clockTime}`}
-      className="request-insights-row"
-      data-internal={isInstantInsights || undefined}
-      data-nested={nested || undefined}
-      data-page-load={pageLoad}
-      data-selected={selected}
-      onClick={onSelect}
-      type="button"
-    >
-      <span className="request-insights-status" data-status={request.status} />
-      <span className="request-insights-route">
-        {nested ? <NestedArrowIcon /> : null}
-        <span className="request-insights-route-label">
-          {isInstantInsights ? 'Instant Insights' : requestUrl}
-        </span>
-      </span>
-      <span className="request-insights-duration">
-        {formatDuration(request.durationMs)}
-      </span>
-      <span className="request-insights-meta request-insights-row-metadata">
+    <ContextMenu.Root>
+      <ContextMenu.Trigger
+        render={
+          <button
+            aria-label={`${isInstantInsights ? `Instant Insights for ${requestUrl}` : requestUrl}, ${requestType.accessibleLabel}, ${bypassesProxy ? 'Did not match the configured proxy, ' : ''}${formatDuration(request.durationMs)}, ${clockTime}`}
+            className="request-insights-row"
+            data-internal={isInstantInsights || undefined}
+            data-nested={nested || undefined}
+            data-page-load={pageLoad}
+            data-selected={selected}
+            onClick={onSelect}
+            onContextMenu={onSelect}
+            type="button"
+          />
+        }
+      >
         <span
-          className="request-insights-request-type"
-          data-type={requestType.type}
-          title={requestType.accessibleLabel}
-        >
-          {requestType.label}
-        </span>
-        {bypassesProxy ? (
-          <span
-            className="request-insights-request-activity"
-            title="This request did not match the configured proxy"
-          >
-            No proxy
+          className="request-insights-status"
+          data-status={request.status}
+        />
+        <span className="request-insights-route">
+          {nested ? <NestedArrowIcon /> : null}
+          <span className="request-insights-route-label">
+            {isInstantInsights ? 'Instant Insights' : requestUrl}
           </span>
-        ) : null}
-        <span>{clockTime}</span>
-      </span>
-      <span className="request-insights-meta request-insights-fetch-summary">
-        {request.fetches.length
-          ? `${request.fetches.length} fetch${request.fetches.length === 1 ? '' : 'es'}`
-          : 'No fetches'}
-      </span>
-    </button>
+        </span>
+        <span className="request-insights-duration">
+          {formatDuration(request.durationMs)}
+        </span>
+        <span className="request-insights-meta request-insights-row-metadata">
+          <span
+            className="request-insights-request-type"
+            data-type={requestType.type}
+            title={requestType.accessibleLabel}
+          >
+            {requestType.label}
+          </span>
+          {bypassesProxy ? (
+            <span
+              className="request-insights-request-activity"
+              title="This request did not match the configured proxy"
+            >
+              No proxy
+            </span>
+          ) : null}
+          <span>{clockTime}</span>
+        </span>
+        <span className="request-insights-meta request-insights-fetch-summary">
+          {request.fetches.length
+            ? `${request.fetches.length} fetch${request.fetches.length === 1 ? '' : 'es'}`
+            : 'No fetches'}
+        </span>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal container={shadowRoot}>
+        <ContextMenu.Positioner
+          className="request-insights-context-positioner"
+          sideOffset={4}
+        >
+          <ContextMenu.Popup
+            aria-label={`Actions for request ${request.requestId}`}
+            className="request-insights-context-menu"
+          >
+            <ContextMenu.Group>
+              <ContextMenu.GroupLabel className="request-insights-context-label">
+                Request
+              </ContextMenu.GroupLabel>
+              <div className="request-insights-context-preview">
+                <RequestContextMenuPreview
+                  request={request}
+                  requestUrl={requestUrl}
+                />
+              </div>
+            </ContextMenu.Group>
+            <ContextMenu.Separator className="request-insights-context-separator" />
+            <RequestContextMenuItem
+              getValue={() => request.requestId}
+              label="Copy request ID"
+            />
+            {request.htmlRequestId !== request.requestId ? (
+              <RequestContextMenuItem
+                getValue={() => request.htmlRequestId}
+                label="Copy page-load ID"
+              />
+            ) : null}
+            {capturedRequestUrl ? (
+              <RequestContextMenuItem
+                getValue={() => capturedRequestUrl}
+                label="Copy request URL"
+              />
+            ) : null}
+            <RequestContextMenuItem
+              getValue={() => JSON.stringify(request, null, 2)}
+              label="Copy request JSON"
+            />
+            <RequestContextMenuItem
+              getValue={() => getRequestInsightAgentPrompt(request)}
+              label="Copy agent prompt"
+            />
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   )
+}
+
+function RequestContextMenuPreview({
+  request,
+  requestUrl,
+}: {
+  request: RequestInsight
+  requestUrl: string
+}) {
+  const overview = getRequestOverview(request)
+
+  return (
+    <>
+      <strong title={requestUrl}>{requestUrl}</strong>
+      <span>
+        {overview.method ?? 'Instant'} · {overview.statusLabel} ·{' '}
+        {overview.kind}
+      </span>
+      <span>
+        {formatDuration(request.durationMs)} · {overview.spanSummary} ·{' '}
+        {overview.fetchSummary}
+      </span>
+      <code title={request.requestId}>
+        {getShortRequestId(request.requestId)}
+      </code>
+    </>
+  )
+}
+
+function RequestContextMenuItem({
+  getValue,
+  label,
+}: {
+  getValue: () => string
+  label: string
+}) {
+  return (
+    <ContextMenu.Item
+      className="request-insights-context-item"
+      onClick={() => copyToClipboard(getValue())}
+    >
+      {label}
+    </ContextMenu.Item>
+  )
+}
+
+function copyToClipboard(value: string) {
+  if (!navigator.clipboard) {
+    console.warn('Copy to clipboard is not supported in this browser')
+    return
+  }
+
+  void navigator.clipboard.writeText(value).catch((error) => {
+    console.warn(error)
+  })
 }
 
 function NestedArrowIcon() {
@@ -512,6 +632,16 @@ function RequestDetails({
               className="request-insights-copy"
               content={JSON.stringify(request, null, 2)}
               successLabel="Copied request JSON"
+            />
+          </div>
+          <div className="request-insights-request-id">
+            <span>Request ID</span>
+            <code title={request.requestId}>{request.requestId}</code>
+            <CopyButton
+              actionLabel="Copy request ID"
+              className="request-insights-copy request-insights-id-copy"
+              content={request.requestId}
+              successLabel="Copied request ID"
             />
           </div>
         </div>

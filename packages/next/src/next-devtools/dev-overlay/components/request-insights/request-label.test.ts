@@ -1,8 +1,10 @@
 import {
   formatRequestRouteParams,
   getRequestDisplayUrl,
+  getRequestInsightAgentPrompt,
   getRequestListDisplayUrl,
   getRequestRouteParams,
+  getShortRequestId,
 } from './request-label'
 
 describe('request insight request labels', () => {
@@ -83,5 +85,15 @@ describe('request insight request labels', () => {
         url: '/products/one/two',
       })
     ).toBeUndefined()
+  })
+
+  it('formats request IDs and agent prompts for the context menu', () => {
+    expect(getShortRequestId('request-1')).toBe('request-1')
+    expect(getShortRequestId('0123456789abcdefghijklmnop')).toBe(
+      '0123456789ab…'
+    )
+    expect(getRequestInsightAgentPrompt({ requestId: 'request-1' })).toBe(
+      'Inspect Request Insights request request-1 with the get_request_insights MCP tool. Explain where its time went, including slow spans, fetches, cache behavior, and errors.'
+    )
   })
 })

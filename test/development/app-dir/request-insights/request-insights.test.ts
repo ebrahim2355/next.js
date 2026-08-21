@@ -948,6 +948,54 @@ describe('request insights', () => {
       ).toBe(true)
       expect(details.text).not.toContain('Q2_SECRET_SENTINEL')
     })
+
+    const requestId = await browser.eval(() => {
+      const root = document.querySelector('nextjs-portal')?.shadowRoot
+      return (
+        root
+          ?.querySelector('.request-insights-request-id code')
+          ?.textContent?.trim() ?? ''
+      )
+    })
+    expect(requestId).not.toBe('')
+
+    await browser.eval(() => {
+      const root = document.querySelector('nextjs-portal')?.shadowRoot
+      const row = Array.from(
+        root?.querySelectorAll<HTMLButtonElement>('.request-insights-row') ?? []
+      ).find((candidate) =>
+        candidate.textContent?.includes('/products/blue?query=redacted')
+      )
+      const rect = row?.getBoundingClientRect()
+      row?.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect?.left ?? 0,
+          clientY: rect?.top ?? 0,
+        })
+      )
+    })
+
+    await retry(async () => {
+      const menu = await browser.eval(() => {
+        const root = document.querySelector('nextjs-portal')?.shadowRoot
+        const popup = root?.querySelector<HTMLElement>(
+          '.request-insights-context-menu'
+        )
+        return {
+          label: popup?.getAttribute('aria-label') ?? '',
+          text: popup?.textContent ?? '',
+        }
+      })
+
+      expect(menu.label).toBe(`Actions for request ${requestId}`)
+      expect(menu.text).toContain('/products/blue?query=redacted')
+      expect(menu.text).toContain('Copy request ID')
+      expect(menu.text).toContain('Copy request URL')
+      expect(menu.text).toContain('Copy request JSON')
+      expect(menu.text).toContain('Copy agent prompt')
+    })
   })
 
   it('keeps trace inspection anchored while the panel is resized', async () => {

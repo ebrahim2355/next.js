@@ -12,6 +12,16 @@ export function getRequestDisplayUrl(request: RequestIdentity): string {
   return request.url ?? request.route ?? request.requestId
 }
 
+export function getShortRequestId(requestId: string): string {
+  return requestId.length <= 16 ? requestId : `${requestId.slice(0, 12)}…`
+}
+
+export function getRequestInsightAgentPrompt(
+  request: Pick<RequestInsight, 'requestId'>
+): string {
+  return `Inspect Request Insights request ${request.requestId} with the get_request_insights MCP tool. Explain where its time went, including slow spans, fetches, cache behavior, and errors.`
+}
+
 export function getRequestListDisplayUrl(
   request: RequestIdentity,
   rscRequest: boolean
