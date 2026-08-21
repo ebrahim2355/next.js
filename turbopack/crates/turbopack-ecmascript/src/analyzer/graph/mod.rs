@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use swc_core::{
     atoms::Atom,
-    common::BytePos,
+    common::{BytePos, Span},
     ecma::{ast::*, visit::VisitWithAstPath},
 };
 use turbopack_core::resolve::ExportUsage;
@@ -34,6 +34,7 @@ pub struct VarGraph<'a> {
     pub free_var_ids: FxHashMap<Atom, Id>,
 
     pub effects: Vec<Effect<'a>>,
+
     // Some unconditional codegens, usually for ESM items.
     pub code_gens: Vec<CodeGen>,
 
@@ -44,6 +45,8 @@ pub struct VarGraph<'a> {
     /// Present when the module is a statically-analyzable CommonJS module (no
     /// dynamic exports); carries its named exports for scope hoisting.
     pub cjs_static_exports: Option<CjsStaticExports>,
+
+    pub dynamic_process_env_access: Option<Span>,
 }
 
 impl<'a> VarGraph<'a> {
@@ -77,6 +80,7 @@ pub fn create_graph<'a>(
             code_gens: Default::default(),
             require_usage: Default::default(),
             cjs_static_exports: Default::default(),
+            dynamic_process_env_access: None,
         },
         eval_context,
         state: Default::default(),
