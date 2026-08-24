@@ -1441,7 +1441,8 @@ pub struct ExperimentalConfig {
     turbopack_infer_module_side_effects: Option<bool>,
     /// Enable tree shaking of unused exports from static CommonJS modules. Defaults to false.
     turbopack_cjs_tree_shaking: Option<bool>,
-    /// Shorten ("mangle") the export names modules expose to each other. Defaults to false.
+    /// Shorten ("mangle") the export names modules expose to each other. Defaults to true on
+    /// canary releases and false on stable releases; never applies in development mode.
     turbopack_mangle_export_names: Option<bool>,
     /// Enable scope hoisting of static CommonJS modules. Defaults to false.
     turbopack_cjs_scope_hoisting: Option<bool>,
@@ -2571,12 +2572,18 @@ impl NextConfig {
     }
 
     #[turbo_tasks::function]
-    pub fn turbopack_mangle_export_names(&self) -> Vc<bool> {
-        Vc::cell(
-            self.experimental
+    pub async fn turbopack_mangle_export_names(&self, mode: Vc<NextMode>) -> Result<Vc<bool>> {
+        Ok(Vc::cell(match *mode.await? {
+            // Mangling requires minification with mangling enabled, which never happens in
+            // development.
+            NextMode::Development => false,
+            // Defaulted on for canary releases and off for stable ones by `defaultConfig` in
+            // `config-shared.ts`, the same way `turbopackSharedRuntime` is.
+            NextMode::Build => self
+                .experimental
                 .turbopack_mangle_export_names
                 .unwrap_or(false),
-        )
+        }))
     }
 
     #[turbo_tasks::function]
