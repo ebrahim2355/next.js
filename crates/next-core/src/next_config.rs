@@ -2573,17 +2573,16 @@ impl NextConfig {
 
     #[turbo_tasks::function]
     pub async fn turbopack_mangle_export_names(&self, mode: Vc<NextMode>) -> Result<Vc<bool>> {
-        Ok(Vc::cell(match *mode.await? {
-            // Mangling requires minification with mangling enabled, which never happens in
-            // development.
-            NextMode::Development => false,
-            // Defaulted on for canary releases and off for stable ones by `defaultConfig` in
-            // `config-shared.ts`, the same way `turbopackSharedRuntime` is.
-            NextMode::Build => self
-                .experimental
-                .turbopack_mangle_export_names
-                .unwrap_or(false),
-        }))
+        // An explicit value always wins, in either mode. Only when the option is unset does mode
+        // supply a default: on for a production build, off in development (mangling additionally
+        // requires minification with mangling, which Turbopack's own minifier gate already keeps
+        // off there, so this default doesn't need to duplicate that — it exists so canary's
+        // `defaultConfig` in `config-shared.ts` can leave the option unset rather than pin it).
+        let mangle = match self.experimental.turbopack_mangle_export_names {
+            Some(mangle) => mangle,
+            None => matches!(*mode.await?, NextMode::Build),
+        };
+        Ok(Vc::cell(mangle))
     }
 
     #[turbo_tasks::function]

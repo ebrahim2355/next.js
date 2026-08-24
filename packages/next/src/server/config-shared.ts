@@ -2353,7 +2353,7 @@ export const defaultConfig = Object.freeze({
     turbopackInferModuleSideEffects: true,
     turbopackPluginRuntimeStrategy: 'childProcesses',
     turbopackSharedRuntime: !isStableBuild(),
-    turbopackMangleExportNames: !isStableBuild(),
+    turbopackMangleExportNames: isStableBuild() ? false : undefined,
   },
   htmlLimitedBots: undefined,
   bundlePagesRouterDependencies: false,
