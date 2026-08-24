@@ -12,6 +12,16 @@
  * the PPR shell requires replacing it with per-section Suspense boundaries
  * so each section can stream independently.
  *
+ * This eval is judged semantically end to end. It previously also grepped
+ * app/page.tsx for >=3 literal <Suspense> tags and for each section sitting in
+ * its own block in that file. Those two assertions contradicted the judge: a
+ * model that co-locates each boundary inside the section component builds
+ * fine, yields a correctly partially prerendered route, and was passed by the
+ * judge, yet failed the greps purely because the tags were not typed in
+ * page.tsx. They vetoed the judge they were meant to be replaced by, so they
+ * are gone; the granularity requirement they encoded now lives in the
+ * criterion below.
+ *
  * The does-Page-block-on-data check is semantic, so it uses the agentic LLM
  * judge rather than regex. The old /getDashboardData\s*\(/ whole-file ban
  * rejected functionally correct streaming — e.g. async section components
@@ -22,43 +32,13 @@
  */
 
 import { expect, test } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
 import { environment } from '@vercel/agent-eval/eval'
-
-const appDir = join(process.cwd(), 'app')
-
-function readFile(name: string): string {
-  return readFileSync(join(appDir, name), 'utf-8')
-}
-
-test('Page has at least 3 Suspense boundaries', () => {
-  const page = readFile('page.tsx')
-
-  const suspenseCount = (page.match(/<Suspense[\s>]/g) || []).length
-  expect(suspenseCount).toBeGreaterThanOrEqual(3)
-})
-
-test('Each dashboard section has its own Suspense boundary in page.tsx', () => {
-  const page = readFile('page.tsx')
-
-  // Split page into Suspense blocks: text between each <Suspense and </Suspense>
-  const suspenseBlocks = page.split(/<Suspense[\s>]/).slice(1)
-
-  const components = ['CardStats', 'RevenueChart', 'LatestInvoices']
-  for (const component of components) {
-    const inOwnBlock = suspenseBlocks.some(
-      (block) => block.includes(component) && block.includes('</Suspense>')
-    )
-    expect(inOwnBlock, `${component} should be inside its own <Suspense>`).toBe(
-      true
-    )
-  }
-})
 
 test('Page does not await all data before rendering', async () => {
   await expect(environment).toSatisfyCriterion(
-    `The dashboard page must produce a static PPR shell: the default-exported Page component in app/page.tsx returns its JSX frame without blocking on dashboard data, and the data-driven sections stream in under <Suspense> boundaries.
+    `The dashboard page must produce a static PPR shell: the default-exported Page component in app/page.tsx returns its JSX frame without blocking on dashboard data, and each of the three data-driven sections (CardStats, RevenueChart, LatestInvoices) streams in behind its own Suspense boundary so they suspend independently of one another.
+
+The boundaries do not have to be written in app/page.tsx. Wrapping each section inside its own component file is equally correct, and often better, because it keeps more static content (headings, card frames) in the prerendered shell. Judge where the boundaries actually sit in the rendered tree, not which file the <Suspense> tag is typed in.
 
 For reference, one correct solution keeps Page synchronous and moves each await into a Suspense-wrapped child:
 
