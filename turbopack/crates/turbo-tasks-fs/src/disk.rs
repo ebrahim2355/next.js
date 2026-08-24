@@ -1964,6 +1964,83 @@ mod tests {
             tt.stop_and_wait().await;
         }
 
+        #[cfg(unix)]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn test_link_target_points_to_directory_through_chain() {
+            use std::os::unix::fs::symlink;
+
+            let scratch = tempfile::tempdir().unwrap();
+            let path = scratch.path().to_owned();
+            create_dir_all(path.join("target-dir")).unwrap();
+            File::create_new(path.join("target-file")).unwrap();
+            symlink("target-dir", path.join("dir-inner")).unwrap();
+            symlink("dir-inner", path.join("dir-outer")).unwrap();
+            symlink("target-file", path.join("file-inner")).unwrap();
+            symlink("file-inner", path.join("file-outer")).unwrap();
+            symlink("cycle-b", path.join("cycle-a")).unwrap();
+            symlink("cycle-a", path.join("cycle-b")).unwrap();
+
+            let root = canonicalize_to_rcstr(&path).unwrap();
+
+            #[turbo_tasks::function(operation, root)]
+            async fn assert_operation(
+                fs: ResolvedVc<DiskFileSystem>,
+                root_path: FileSystemPath,
+            ) -> anyhow::Result<()> {
+                let dir = fs.read_link(root_path.join("dir-outer")?).await?;
+                let LinkContent::Link { target: dir_target } = &*dir else {
+                    anyhow::bail!("expected a valid link, got {dir:?}");
+                };
+                assert_eq!(
+                    dir_target.target_type().await?,
+                    FileSystemEntryType::Symlink
+                );
+                assert!(dir_target.points_to_directory().await?);
+
+                let file = fs.read_link(root_path.join("file-outer")?).await?;
+                let LinkContent::Link {
+                    target: file_target,
+                } = &*file
+                else {
+                    anyhow::bail!("expected a valid link, got {file:?}");
+                };
+                assert!(!file_target.points_to_directory().await?);
+
+                let cycle = fs.read_link(root_path.join("cycle-a")?).await?;
+                let LinkContent::Link {
+                    target: cycle_target,
+                } = &*cycle
+                else {
+                    anyhow::bail!("expected a valid link, got {cycle:?}");
+                };
+                assert!(!cycle_target.points_to_directory().await?);
+
+                Ok(())
+            }
+
+            let tt = turbo_tasks::TurboTasks::new(TurboTasksBackend::new(
+                BackendOptions::default(),
+                noop_backing_storage(),
+            ));
+
+            tt.run_once(async move {
+                let fs = disk_file_system_operation(root)
+                    .resolve()
+                    .strongly_consistent()
+                    .await?;
+
+                assert_operation(fs, disk_file_system_root(fs))
+                    .read_strongly_consistent()
+                    .await?;
+
+                anyhow::Ok(())
+            })
+            .await
+            .unwrap();
+
+            tt.stop_and_wait().await;
+        }
+
         /// A relative target must stay inside the filesystem root at every step, not just at the
         /// end. Both of these step above the root; one comes back into it and one doesn't, but
         /// neither can be resolved against a root-relative [`FileSystemPath`], so `read_link`

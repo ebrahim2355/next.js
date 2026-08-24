@@ -200,6 +200,20 @@ impl LinkTarget {
     pub async fn target_type(&self) -> Result<FileSystemEntryType> {
         Ok(*self.file_system_path().get_type().await?)
     }
+
+    /// Whether this link ultimately points to a directory.
+    ///
+    /// This follows symlink chains. Invalid, dangling, and cyclic chains are not directories.
+    pub async fn points_to_directory(&self) -> Result<bool> {
+        let result = self.file_system_path().realpath_with_links().await?;
+        let Ok(path) = &result.path_result else {
+            return Ok(false);
+        };
+        Ok(matches!(
+            *path.get_type().await?,
+            FileSystemEntryType::Directory
+        ))
+    }
 }
 
 /// The contents of a symbolic link, as read from a filesystem. On Windows, this may be a junction

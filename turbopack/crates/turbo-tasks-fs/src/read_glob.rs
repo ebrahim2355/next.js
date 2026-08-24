@@ -5,8 +5,7 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{Completion, ResolvedVc, TryJoinIterExt, Vc, turbobail};
 
 use crate::{
-    DirectoryContent, DirectoryEntry, FileSystem, FileSystemEntryType, FileSystemPath, LinkContent,
-    glob::Glob,
+    DirectoryContent, DirectoryEntry, FileSystem, FileSystemPath, LinkContent, glob::Glob,
 };
 
 #[turbo_tasks::value]
@@ -89,8 +88,7 @@ async fn read_glob_internal(
                         // Skip links that leave the filesystem root.
                         let link_content = path.read_link().await?;
                         if let LinkContent::Link { target } = &*link_content {
-                            if matches!(target.target_type().await?, FileSystemEntryType::Directory)
-                            {
+                            if target.points_to_directory().await? {
                                 // Ensure that there are no infinite link loops, but don't resolve
                                 resolve_symlink_safely(entry.clone()).await?;
 
@@ -343,7 +341,7 @@ pub mod tests {
         );
         assert_eq!(inner.inner.len(), 0);
 
-        // A symlinked folder
+        // A folder behind a symlink-to-symlink chain
         let read_dir = root
             .read_glob(Glob::new(rcstr!("sub/dir/*"), GlobOptions::default()))
             .await
@@ -449,7 +447,9 @@ pub mod tests {
                 .unwrap()
                 .write_all(b"dir index")
                 .unwrap();
-            symlink(&dir, path.join("sub/dir")).unwrap();
+            let dir_link = path.join("dir-link");
+            symlink(&dir, &dir_link).unwrap();
+            symlink(dir_link, path.join("sub/dir")).unwrap();
         }
         let tt = turbo_tasks::TurboTasks::new(TurboTasksBackend::new(
             BackendOptions::default(),

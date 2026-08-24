@@ -13,9 +13,7 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     NonLocalValue, TaskInput, ValueToString, Vc, debug::ValueDebugFormat, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::{
-    FileSystemEntryType, FileSystemPath, LinkContent, RawDirectoryContent, RawDirectoryEntry,
-};
+use turbo_tasks_fs::{FileSystemPath, LinkContent, RawDirectoryContent, RawDirectoryEntry};
 use turbo_unix_path::normalize_path;
 
 #[turbo_tasks::value]
@@ -1610,8 +1608,7 @@ pub async fn read_matches(
                                 continue;
                             };
                             let path = concat(&prefix, str).into();
-                            if matches!(target.target_type().await?, FileSystemEntryType::Directory)
-                            {
+                            if target.points_to_directory().await? {
                                 results.push((index, PatternMatch::Directory(path, fs_path)));
                             } else {
                                 results.push((index, PatternMatch::File(path, fs_path)))
@@ -1798,10 +1795,7 @@ pub async fn read_matches(
                                     if let LinkContent::Link { target } =
                                         &*fs_path.read_link().await?
                                     {
-                                        if matches!(
-                                            target.target_type().await?,
-                                            FileSystemEntryType::Directory
-                                        ) {
+                                        if target.points_to_directory().await? {
                                             results.push((
                                                 pos,
                                                 PatternMatch::Directory(
@@ -1822,10 +1816,7 @@ pub async fn read_matches(
                                     let fs_path = lookup_dir.join(key)?;
                                     if let LinkContent::Link { target } =
                                         &*fs_path.read_link().await?
-                                        && matches!(
-                                            target.target_type().await?,
-                                            FileSystemEntryType::Directory
-                                        )
+                                        && target.points_to_directory().await?
                                     {
                                         results.push((
                                             pos,
@@ -1837,10 +1828,7 @@ pub async fn read_matches(
                                     let fs_path = lookup_dir.join(key)?;
                                     if let LinkContent::Link { target } =
                                         &*fs_path.read_link().await?
-                                        && matches!(
-                                            target.target_type().await?,
-                                            FileSystemEntryType::Directory
-                                        )
+                                        && target.points_to_directory().await?
                                     {
                                         results.push((
                                             pos,
