@@ -1309,11 +1309,6 @@ async fn analyze_ecmascript_module_internal(
                     ast_path,
                     span,
                 } => {
-                    debug_assert!(
-                        analyze_mode.is_code_gen(),
-                        "unexpected Effect::Member in tracing mode"
-                    );
-
                     // Intentionally not awaited because `handle_member` reads this only when needed
                     let obj =
                         analysis_state.link_value(take(&mut *obj), ImportAttributes::empty_ref());
