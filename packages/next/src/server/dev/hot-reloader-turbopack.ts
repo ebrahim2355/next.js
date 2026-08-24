@@ -161,20 +161,20 @@ const isTestMode = !!(
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random())
 
 /** How long an emitted asset may go unwritten before startup sweeps it. */
-const STALE_OUTPUT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // One week
+const DEFAULT_STALE_OUTPUT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // One week
 
 /** Output directory (relative to `distDir`) of server-HMR-managed chunks. */
 const SERVER_HMR_CHUNKS_DIR = join('server', 'chunks')
 
 /**
- * Directories (relative to `distDir`) holding content-hashed turbopack output,
- * per the chunking contexts in `next-core`. Entry chunks are deliberately left
- * out: their paths derive from the route rather than a content hash, so they
- * are overwritten in place instead of accumulating.
+ * Directories (relative to `distDir`) holding Turbopack output, per the
+ * chunking contexts in `next-core`.
  */
 const STALE_SWEPT_OUTPUT_DIRS = [
   join('static', 'chunks'),
   join('static', 'media'),
+  join('server', 'app'),
+  join('server', 'pages'),
   SERVER_HMR_CHUNKS_DIR,
   join('server', 'edge', 'chunks'),
   join('server', 'edge', 'assets'),
@@ -465,6 +465,10 @@ export async function createHotReloaderTurbopack(
     })
   }
 
+  const staleOutputMaxAge =
+    nextConfig.experimental.turbopackStaleOutputMaxAge ??
+    DEFAULT_STALE_OUTPUT_MAX_AGE_MS
+
   // Clean up any old output files from previous runs. This is safe as Turbopack
   // will restore any missing chunks from persistent cache or recompute them.
   //
@@ -477,7 +481,7 @@ export async function createHotReloaderTurbopack(
       recursiveDeleteSyncWithAsyncRetries(
         join(distDir, subDir),
         undefined,
-        STALE_OUTPUT_MAX_AGE_MS
+        staleOutputMaxAge
       )
     )
   )

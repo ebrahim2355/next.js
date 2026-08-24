@@ -945,6 +945,12 @@ export interface ExperimentalConfig {
   turbopackSeedCacheFromWorktree?: boolean
 
   /**
+   * The maximum age, in milliseconds, of Turbopack development output kept
+   * between dev server sessions. Defaults to one week.
+   */
+  turbopackStaleOutputMaxAge?: number
+
+  /**
    * Enable source maps. Defaults to true.
    */
   turbopackSourceMaps?: boolean

@@ -59,15 +59,22 @@ function unlinkPath(
   }
 }
 
-/** Returns whether `p`'s own mtime is at least `maxAgeMs` in the past. */
-function isStale(p: string, maxAgeMs: number): boolean {
+const FUTURE_MTIME_TOLERANCE_MS = 60 * 60 * 1000
+
+/** Returns whether `p`'s own mtime falls outside the retained time range. */
+function isStale(
+  p: string,
+  staleBefore: number,
+  futureMtimeThreshold: number
+): boolean {
   try {
     // lstat, not stat: a symlink is deleted based on its own age, not its
     // target's.
-    return Date.now() - fs.lstatSync(p).mtimeMs >= maxAgeMs
+    const mtimeMs = fs.lstatSync(p).mtimeMs
+    return mtimeMs <= staleBefore || mtimeMs > futureMtimeThreshold
   } catch (e) {
     if (isError(e) && e.code === 'ENOENT') {
-      // Already gone; let the delete run and no-op on ENOENT.
+      // Already gone; let the subsequent delete no-op on ENOENT.
       return true
     }
     throw e
@@ -95,7 +102,14 @@ export async function recursiveDeleteSyncWithAsyncRetries(
    */
   maxAgeMs?: number
 ): Promise<void> {
-  await deleteContents(dir, exclude, maxAgeMs, '')
+  const now = Date.now()
+  await deleteContents(
+    dir,
+    exclude,
+    maxAgeMs === undefined ? undefined : now - maxAgeMs,
+    now + FUTURE_MTIME_TOLERANCE_MS,
+    ''
+  )
 }
 
 /**
@@ -105,7 +119,8 @@ export async function recursiveDeleteSyncWithAsyncRetries(
 async function deleteContents(
   dir: string,
   exclude: RegExp | undefined,
-  maxAgeMs: number | undefined,
+  staleBefore: number | undefined,
+  futureMtimeThreshold: number,
   /** Relative path to the directory being deleted, used for exclude */
   previousPath: string
 ): Promise<boolean> {
@@ -121,32 +136,44 @@ async function deleteContents(
 
   let keptAnything = false
 
-  await Promise.all(
-    result.map(async (part: Dirent) => {
-      const absolutePath = join(dir, part.name)
-      const pp = join(previousPath, part.name)
+  for (const part of result as Dirent[]) {
+    const absolutePath = join(dir, part.name)
+    const pp = join(previousPath, part.name)
 
-      if (exclude?.test(pp)) {
+    if (exclude?.test(pp)) {
+      keptAnything = true
+      continue
+    }
+
+    // Note: readdir does not follow symbolic links, that's good: we want to
+    // delete the links and not the destination.
+    const isDirectory = part.isDirectory()
+    if (isDirectory) {
+      if (
+        await deleteContents(
+          absolutePath,
+          exclude,
+          staleBefore,
+          futureMtimeThreshold,
+          pp
+        )
+      ) {
         keptAnything = true
-        return
+        continue
       }
+    } else if (
+      staleBefore !== undefined &&
+      !isStale(absolutePath, staleBefore, futureMtimeThreshold)
+    ) {
+      keptAnything = true
+      continue
+    }
 
-      // Note: readdir does not follow symbolic links, that's good: we want to
-      // delete the links and not the destination.
-      const isDirectory = part.isDirectory()
-      if (isDirectory) {
-        if (await deleteContents(absolutePath, exclude, maxAgeMs, pp)) {
-          keptAnything = true
-          return
-        }
-      } else if (maxAgeMs !== undefined && !isStale(absolutePath, maxAgeMs)) {
-        keptAnything = true
-        return
-      }
-
-      return unlinkPath(absolutePath, isDirectory)
-    })
-  )
+    const retry = unlinkPath(absolutePath, isDirectory)
+    if (retry) {
+      await retry
+    }
+  }
 
   return keptAnything
 }

@@ -76,6 +76,22 @@ describe('recursiveDeleteSyncWithAsyncRetries', () => {
       await recursiveDeleteSyncWithAsyncRetries(dir)
     }
   })
+
+  it('should delete files with mtimes far in the future', async () => {
+    const dir = join(__dirname, 'isolated', 'future-mtime')
+    try {
+      const futureFile = join(dir, 'future.js')
+      await fs.outputFile(futureFile, 'future')
+      const twoHoursFromNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
+      await fs.utimes(futureFile, twoHoursFromNow, twoHoursFromNow)
+
+      await recursiveDeleteSyncWithAsyncRetries(dir, undefined, 60 * 60 * 1000)
+
+      expect(await fs.pathExists(futureFile)).toBe(false)
+    } finally {
+      await recursiveDeleteSyncWithAsyncRetries(dir)
+    }
+  })
 })
 
 describe('calcBackoffMs', () => {
