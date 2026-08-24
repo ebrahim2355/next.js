@@ -277,6 +277,7 @@ mod tests {
     /// no helper can be scheduled; we assert the scope still finishes well before that deadline.
     /// The deadline also guarantees the test fails cleanly instead of hanging.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_scope_worker_threads_occupied() {
         const WORKER_THREADS: usize = 2;
         const JOBS: usize = 64;
@@ -329,6 +330,7 @@ mod tests {
     /// On a `current_thread` runtime no helpers can be spawned and `block_in_place` is not allowed,
     /// so the calling thread must drain the queue inline rather than panicking or hanging.
     #[tokio::test(flavor = "current_thread")]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_scope_current_thread_runtime() {
         let results = tokio::task::spawn_blocking(|| {
             scope_and_block(16, |scope| {
@@ -349,6 +351,7 @@ mod tests {
     /// Helpers must actually add parallelism when threads are available: jobs that each block
     /// briefly should complete in far less than their serial sum.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_scope_runs_in_parallel() {
         const JOBS: usize = 16;
         const PER_JOB: Duration = Duration::from_millis(50);
@@ -377,6 +380,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_scope() {
         let results = scope_and_block(1000, |scope| {
             for i in 0..1000 {
@@ -391,6 +395,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_empty_scope() {
         let results = scope_and_block(0, |scope| {
             if false {
@@ -401,6 +406,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_single_task() {
         let results = scope_and_block(1, |scope| {
             scope.spawn(|| 42);
@@ -410,6 +416,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_task_finish_before_scope() {
         let results = scope_and_block(1, |scope| {
             scope.spawn(|| 42);
@@ -420,6 +427,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(target_family = "wasm", ignore = "parking_lot cannot block on wasm")]
     async fn test_task_finish_after_scope() {
         let results = scope_and_block(1, |scope| {
             scope.spawn(|| {
@@ -432,6 +440,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    // Relies on `catch_unwind` catching, which needs unwinding; wasm is panic = abort.
+    #[cfg_attr(target_family = "wasm", ignore = "no unwinding on wasm")]
     async fn test_panic_in_scope_factory() {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _results = scope_and_block(1000, |scope| {
@@ -450,6 +460,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    // Relies on `catch_unwind` catching, which needs unwinding; wasm is panic = abort.
+    #[cfg_attr(target_family = "wasm", ignore = "no unwinding on wasm")]
     async fn test_panic_in_scope_task() {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _results = scope_and_block(1000, |scope| {

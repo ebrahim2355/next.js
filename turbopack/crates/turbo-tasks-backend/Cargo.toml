@@ -67,7 +67,6 @@ thread_local = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
-criterion = { workspace = true, features = ["async_tokio"] }
 futures = { workspace = true }
 indoc = { workspace = true }
 regex = { workspace = true }
@@ -77,6 +76,12 @@ thiserror = { workspace = true }
 turbo-tasks-malloc = { workspace = true , features = ["custom_allocator"]}
 rstest = { workspace = true }
 turbo-tasks-testing = { workspace = true }
+
+# Only used by the benchmarks, which don't run on wasm. Gated by target so that
+# `cargo test -p turbo-tasks-backend --lib --target wasm32-wasip1-threads` can build: criterion pulls
+# in rayon, which refuses to compile for wasi, and cargo resolves dev-dependencies even for `--lib`.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
 
 
 [[bench]]
