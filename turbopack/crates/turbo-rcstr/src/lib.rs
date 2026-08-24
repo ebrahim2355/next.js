@@ -772,15 +772,27 @@ mod tests {
     #[test]
     fn test_inline_atom() {
         // This is a silly test, just asserts that we can evaluate this in a constant context.
+        //
+        // The literal has to fit the *target's* inline capacity: `MAX_INLINE_LEN` is
+        // `size_of::<TaggedValue>() - 1`, so it is 7 on 64-bit but only 3 on 32-bit. A literal that
+        // doesn't fit makes `inline_atom` return `None`, and the `unreachable!()` below then fails
+        // const-eval rather than the test failing at runtime.
+        const SHORT: &str = "abc";
+        const _: () = assert!(SHORT.len() <= MAX_INLINE_LEN);
         const STR: RcStr = {
-            let inline = inline_atom("hello");
+            let inline = inline_atom(SHORT);
             if inline.is_some() {
                 inline.unwrap()
             } else {
                 unreachable!();
             }
         };
-        assert_eq!(STR, RcStr::from("hello"));
+        assert_eq!(STR, RcStr::from(SHORT));
+        assert_eq!(STR.tag(), INLINE_TAG);
+
+        // A literal one byte past the capacity must not inline, on either width.
+        let too_long = "x".repeat(MAX_INLINE_LEN + 1);
+        assert!(inline_atom(&too_long).is_none());
     }
 
     #[test]
@@ -836,6 +848,9 @@ mod tests {
     }
 
     #[test]
+    // `STATIC_RCSTRS` is an empty array on wasm (see its definition above), so there is no static
+    // registry for the decoder to resolve against and the value comes back as `DYNAMIC_TAG`.
+    #[cfg_attr(target_family = "wasm", ignore = "no static RcStr registry on wasm")]
     fn test_bincode_roundtrip() {
         use turbo_bincode::{turbo_bincode_decode, turbo_bincode_encode};
 

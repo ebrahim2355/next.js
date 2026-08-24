@@ -14,9 +14,24 @@ use std::str::FromStr;
 
 use proc_macro::{Literal, TokenStream, TokenTree};
 
-/// `MAX_INLINE_LEN` for the active `turbo-rcstr` configuration. Mirrors
-/// [`turbo_rcstr::tagged_value::MAX_INLINE_LEN`]
-const MAX_INLINE_LEN: usize = if cfg!(feature = "atom_size_128") {
+/// Bounds on the target's `MAX_INLINE_LEN`, mirroring
+/// [`turbo_rcstr::tagged_value::MAX_INLINE_LEN`].
+///
+/// A proc macro runs on the **host**, so `cfg!` here describes the host and cannot tell us the
+/// target's pointer width. `MAX_INLINE_LEN` is `size_of::<TaggedValue>() - 1`, and the tagged value
+/// is pointer-sized unless `atom_size_128` fixes it at 16 bytes — so on a 32-bit target it is 3
+/// where a 64-bit target has 7.
+///
+/// Deciding inline-vs-static from the host's value would emit `inline_atom(lit).unwrap()` for a
+/// 5-byte literal, which returns `None` on a 32-bit target and panics at runtime. So the fast paths
+/// are only taken when the answer is the same for every supported target, and anything in between
+/// is left to the const branch, where `is_atom_inlineable` is evaluated for the actual target.
+const MIN_MAX_INLINE_LEN: usize = if cfg!(feature = "atom_size_128") {
+    15
+} else {
+    3
+};
+const MAX_MAX_INLINE_LEN: usize = if cfg!(feature = "atom_size_128") {
     15
 } else {
     7
@@ -36,9 +51,11 @@ pub fn rcstr(input: TokenStream) -> TokenStream {
     // while keeping the original around for the fallback path.
     {
         let source = if let Some((lit, len)) = classify_literal(input.clone()) {
-            if len <= MAX_INLINE_LEN {
+            if len <= MIN_MAX_INLINE_LEN {
+                // Inlineable on every target.
                 format!("::turbo_rcstr::inline_atom({lit}).unwrap()")
-            } else {
+            } else if len > MAX_MAX_INLINE_LEN {
+                // Too long to inline on any target.
                 format!(
                     "{{ static RCSTR_STORAGE: ::turbo_rcstr::StaticPrehashedString = \
                      ::turbo_rcstr::make_const_prehashed_string({lit}); const RCSTR: \
@@ -46,20 +63,27 @@ pub fn rcstr(input: TokenStream) -> TokenStream {
                      ::turbo_rcstr::__rcstr_static_submit!(
                      ::turbo_rcstr::StaticRcStr(&RCSTR_STORAGE) ); RCSTR }}",
                 )
+            } else {
+                // Depends on the target's pointer width, so let const evaluation choose.
+                const_branch(lit)
             }
         } else {
-            format!(
-                "{{ const TEXT: &str = {input}; if ::turbo_rcstr::is_atom_inlineable(TEXT) {{ \
-                 ::turbo_rcstr::inline_atom(TEXT).unwrap() }} else {{ static RCSTR_STORAGE: \
-                 ::turbo_rcstr::StaticPrehashedString = \
-                 ::turbo_rcstr::make_const_prehashed_string(TEXT); const RCSTR: \
-                 ::turbo_rcstr::RcStr = ::turbo_rcstr::from_static(&RCSTR_STORAGE); \
-                 ::turbo_rcstr::__rcstr_static_submit!(
-                 ::turbo_rcstr::StaticRcStr(&RCSTR_STORAGE) ); RCSTR }} }}",
-            )
+            const_branch(input.to_string())
         };
         TokenStream::from_str(&source).expect("emitted source parses")
     }
+}
+
+/// Expansion that picks the arm during const evaluation, i.e. for the target rather than the host.
+fn const_branch(text: impl std::fmt::Display) -> String {
+    format!(
+        "{{ const TEXT: &str = {text}; if ::turbo_rcstr::is_atom_inlineable(TEXT) {{ \
+         ::turbo_rcstr::inline_atom(TEXT).unwrap() }} else {{ static RCSTR_STORAGE: \
+         ::turbo_rcstr::StaticPrehashedString = ::turbo_rcstr::make_const_prehashed_string(TEXT); \
+         const RCSTR: ::turbo_rcstr::RcStr = ::turbo_rcstr::from_static(&RCSTR_STORAGE); \
+         ::turbo_rcstr::__rcstr_static_submit!( ::turbo_rcstr::StaticRcStr(&RCSTR_STORAGE) ); \
+         RCSTR }} }}",
+    )
 }
 
 /// If `input` is a single string-literal token, return the literal and
